@@ -44,7 +44,9 @@ NODE_ENV=production
 # Port (Railway sets this automatically)
 PORT=3001
 
-# Database paths (optional, defaults to /tmp)
+# Database paths (optional)
+# The app auto-detects /data directory (Railway volume) and falls back to local path
+# Only set these if you want to override the default behavior
 DB_PATH=/data/watchlist.db
 SESSION_DB_PATH=/data/sessions.db
 
@@ -80,10 +82,20 @@ SESSION_SECRET=random_secret_string_here
    - Add `ALPHA_VANTAGE_KEY` (optional)
    - Add `NODE_ENV=production`
 
-4. **Add persistent volume (optional but recommended):**
-   - In Railway dashboard, click "Add Volume"
-   - Mount path: `/data`
-   - This persists the SQLite database across deployments
+4. **Add persistent volume (REQUIRED for data persistence):**
+   
+   **⚠️ Important:** Without a volume, all tickers and user data will be lost on each deploy!
+   
+   To create a volume in Railway:
+   - In Railway dashboard, go to your service
+   - Click the "Settings" tab
+   - Scroll down to "Volumes" section
+   - Click "+ New Volume"
+   - Set mount path to: `/data`
+   - Click "Add"
+   
+   The app will automatically detect the `/data` directory and store databases there.
+   For local development, it falls back to `./watchlist.db` and `./sessions.db`.
 
 5. **Get your domain:**
    - Railway auto-generates a domain like `your-app.up.railway.app`
@@ -224,13 +236,20 @@ Once deployed, test these endpoints:
 - Get your own free API key from https://www.alphavantage.co/support/#api-key
 - Upgrade to Alpha Vantage premium for higher limits
 
-### Database not persisting
+### Database not persisting (tickers lost after deploy)
 
-**Cause:** No persistent volume mounted
+**Cause:** No persistent volume mounted - Railway wipes the filesystem on each deploy
 
 **Solution:**
-- In Railway: Add volume mounted at `/data`
-- Set env vars: `DB_PATH=/data/watchlist.db` and `SESSION_DB_PATH=/data/sessions.db`
+1. In Railway dashboard, go to your service → Settings → Volumes
+2. Click "+ New Volume"
+3. Set mount path to: `/data`
+4. Click "Add"
+5. Redeploy the service
+
+The app automatically uses `/data/watchlist.db` and `/data/sessions.db` when the `/data` directory exists (Railway volume). For local development, it uses `./watchlist.db` and `./sessions.db`.
+
+You do NOT need to set `DB_PATH` or `SESSION_DB_PATH` environment variables unless you want a custom path.
 
 ### Railway CLI "Unauthorized" error
 

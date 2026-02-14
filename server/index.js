@@ -20,7 +20,9 @@ app.use(express.json());
 
 // --- Session Setup ---
 const SessionStore = SqliteStore(session);
-const sessionDbPath = process.env.SESSION_DB_PATH || "/data/sessions.db";
+// Use /data if it exists (Railway volume), otherwise use local path
+const defaultSessionPath = fs.existsSync("/data") ? "/data/sessions.db" : "./sessions.db";
+const sessionDbPath = process.env.SESSION_DB_PATH || defaultSessionPath;
 const sessionDbDir = path.dirname(sessionDbPath);
 if (!fs.existsSync(sessionDbDir)) fs.mkdirSync(sessionDbDir, { recursive: true });
 
@@ -46,7 +48,9 @@ app.use(passport.initialize());
 app.use(passport.session());
 
 // --- Database Setup (SQLite) ---
-const dbPath = process.env.DB_PATH || "/data/watchlist.db";
+// Use /data if it exists (Railway volume), otherwise use local path
+const defaultDbPath = fs.existsSync("/data") ? "/data/watchlist.db" : "./watchlist.db";
+const dbPath = process.env.DB_PATH || defaultDbPath;
 const dbDir = path.dirname(dbPath);
 if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
 
