@@ -102,6 +102,12 @@ db.exec(`
   )
 `);
 
+// Add index for faster duplicate alert lookups
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_alert_history_user_symbol_sent 
+  ON alert_history(user_id, symbol, sent_at)
+`);
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS sma_state (
     user_id INTEGER NOT NULL,
@@ -612,8 +618,8 @@ app.get("/api/telegram/history", requireAuth, (req, res) => {
 // ============================================================
 // Background Job: Crossover Alert Checker
 // Uses Alpha Vantage with caching for reliability
+// Runs once daily at 9:30 AM ET (market open)
 // ============================================================
-const CHECK_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
 
 async function checkCrossoversForUser(userId) {
   const config = db
@@ -650,15 +656,41 @@ async function checkCrossoversForUser(userId) {
 
       if (lastPosition && lastPosition !== currentPosition) {
         const crossType = currentPosition === "above" ? "bullish" : "bearish";
-        const emoji = currentPosition === "above" ? "📈" : "📉";
-        const direction = currentPosition === "above" ? "ABOVE" : "BELOW";
+        
+        // ONLY alert on bearish (below) crossovers
+        if (crossType !== "bearish") {
+          console.log(
+            `[Alert] Skipping bullish crossover for ${item.symbol} (user ${userId}) - only bearish alerts enabled`
+          );
+          continue;
+        }
+
+        // Check for duplicate alerts within the last 7 days
+        const recentAlert = db
+          .prepare(
+            `SELECT id, sent_at FROM alert_history 
+             WHERE user_id = ? AND symbol = ? AND cross_type = 'bearish'
+             AND sent_at > datetime('now', '-7 days')
+             ORDER BY sent_at DESC LIMIT 1`
+          )
+          .get(userId, item.symbol);
+
+        if (recentAlert) {
+          console.log(
+            `[Alert] Suppressing duplicate alert for ${item.symbol} (user ${userId}) - last alert sent at ${recentAlert.sent_at}`
+          );
+          continue;
+        }
+
+        const emoji = "📉";
+        const direction = "BELOW";
 
         const message =
           `<b>${emoji} SMA Crossover Alert: ${item.symbol}</b>\n\n` +
           `<b>${item.symbol}</b> has crossed <b>${direction}</b> its 200-day SMA\n\n` +
           `• Price: <code>$${latestPrice.toFixed(2)}</code>\n` +
           `• 200-Day SMA: <code>$${latestSMA.toFixed(2)}</code>\n` +
-          `• Signal: <b>${crossType === "bullish" ? "Bullish 🟢" : "Bearish 🔴"}</b>\n\n` +
+          `• Signal: <b>Bearish 🔴</b>\n\n` +
           `<i>${new Date().toUTCString()}</i>`;
 
         let telegramSuccess = 0;
@@ -666,7 +698,7 @@ async function checkCrossoversForUser(userId) {
           await sendTelegramMessage(config.bot_token, config.chat_id, message);
           telegramSuccess = 1;
           console.log(
-            `[Alert] Sent ${crossType} crossover alert for ${item.symbol} to user ${userId}`
+            `[Alert] Sent bearish crossover alert for ${item.symbol} to user ${userId}`
           );
         } catch (err) {
           console.error(
@@ -682,8 +714,9 @@ async function checkCrossoversForUser(userId) {
       }
 
       // Rate limit: wait between symbols to respect Alpha Vantage limits
-      // (cache will handle most requests, but fresh fetches need spacing)
-      await new Promise((r) => setTimeout(r, 2000));
+      // Free tier: 5 requests/minute, 25 requests/day
+      // With daily checks, we have plenty of headroom, but still space out requests
+      await new Promise((r) => setTimeout(r, 3000)); // 3 seconds between symbols
     } catch (err) {
       console.error(
         `[Alert] Error checking ${item.symbol} for user ${userId}:`,
@@ -710,15 +743,56 @@ async function runCrossoverCheck() {
 }
 
 let alertInterval = null;
+
+function getNextMarketOpenTime() {
+  const now = new Date();
+  
+  // Convert to ET timezone (UTC-5 or UTC-4 depending on DST)
+  // Using a simple approach: get current time in ET
+  const etOffset = -5 * 60; // ET is UTC-5 (standard time)
+  const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
+  const etTime = new Date(utcTime + (etOffset * 60000));
+  
+  // Set target time to 9:30 AM ET
+  const targetTime = new Date(etTime);
+  targetTime.setHours(9, 30, 0, 0);
+  
+  // If we've already passed 9:30 AM ET today, schedule for tomorrow
+  if (etTime >= targetTime) {
+    targetTime.setDate(targetTime.getDate() + 1);
+  }
+  
+  // Convert back to local time
+  const targetUTC = targetTime.getTime() - (etOffset * 60000);
+  const localTarget = new Date(targetUTC - (now.getTimezoneOffset() * 60000));
+  
+  return localTarget;
+}
+
+function scheduleNextCheck() {
+  const nextRun = getNextMarketOpenTime();
+  const msUntilNext = nextRun.getTime() - Date.now();
+  
+  console.log(`[Alert Job] Next check scheduled for: ${nextRun.toISOString()} (in ${Math.round(msUntilNext / 1000 / 60)} minutes)`);
+  
+  alertInterval = setTimeout(() => {
+    runCrossoverCheck();
+    // Schedule the next check after this one completes
+    scheduleNextCheck();
+  }, msUntilNext);
+}
+
 function startAlertJob() {
+  console.log('[Alert Job] Starting daily alert scheduler (9:30 AM ET)');
+  
+  // Run an initial check 30 seconds after startup (for testing/immediate feedback)
   setTimeout(() => {
+    console.log('[Alert Job] Running initial check on startup...');
     runCrossoverCheck();
   }, 30000);
-
-  alertInterval = setInterval(runCrossoverCheck, CHECK_INTERVAL_MS);
-  console.log(
-    `[Alert Job] Scheduled crossover checks every ${CHECK_INTERVAL_MS / 60000} minutes`
-  );
+  
+  // Schedule the first daily check
+  scheduleNextCheck();
 }
 
 // ============================================================
