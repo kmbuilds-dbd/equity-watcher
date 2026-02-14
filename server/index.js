@@ -115,9 +115,9 @@ db.exec(`
 
 // --- Passport Google OAuth Strategy ---
 if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
-  const callbackURL =
-    process.env.GOOGLE_CALLBACK_URL ||
-    `https://equity-watchlist-app-production.up.railway.app/api/auth/google/callback`;
+  const callbackURL = process.env.RAILWAY_PUBLIC_DOMAIN 
+    ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}/api/auth/google/callback`
+    : process.env.CALLBACK_URL || `https://equity-watcher-production.up.railway.app/api/auth/google/callback`;
 
   passport.use(
     new GoogleStrategy(
