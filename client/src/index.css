@@ -1,0 +1,21 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #222839 #0C0F14;
+}
+
+::selection {
+  background: rgba(79, 142, 247, 0.3);
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 4px 1px rgba(245, 158, 11, 0.3); }
+  50% { box-shadow: 0 0 12px 4px rgba(245, 158, 11, 0.6); }
+}
+
+.alert-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
